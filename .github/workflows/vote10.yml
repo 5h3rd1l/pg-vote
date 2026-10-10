@@ -11,41 +11,8 @@ jobs:
       matrix:
         shard: [1,2,3,4,5,6,7,8,9,10]
     steps:
-      - run: |
-          python3 -c "
-          import json,random,ssl,urllib.request,urllib.parse,concurrent.futures,time
-
-          O='https://34.87.175.229'
-          H='www.agentofferings.propertyguru.com.sg'
-          P='24454'
-          N='560010eb80'
-          V=10
-
-          ctx=ssl.create_default_context()
-          ctx.check_hostname=False
-          ctx.verify_mode=ssl.CERT_NONE
-
-          def cea():
-              return f'R{random.randint(100000,999999)}{chr(random.randint(65,90))}'
-
-          def vote():
-              c=cea()
-              d=urllib.parse.urlencode({'action':'pg_vote_submit','mobile':c,'votes':json.dumps({P:V}),'nonce':N}).encode()
-              r=urllib.request.Request(f'{O}/wp-admin/admin-ajax.php',data=d,headers={'Host':H,'User-Agent':f'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(130,148)}.0.0.0 Safari/537.36','X-Requested-With':'XMLHttpRequest','Content-Type':'application/x-www-form-urlencoded','Referer':f'https://{H}/agent-choice-awards/vote/','Origin':f'https://{H}'})
-              try:
-                  resp=urllib.request.urlopen(r,timeout=45,context=ctx)
-                  body=resp.read().decode()
-                  ok='success' in body
-                  print(f'cea={c} ok={ok}')
-                  return ok
-              except:
-                  return False
-
-          ok=0
-          for wave in range(2):
-              with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
-                  ok+=sum(1 for r in ex.map(lambda _:vote(),range(2)) if r)
-              if wave<1:
-                  time.sleep(2)
-          print(f'DONE {ok}/4 = {ok*V}v')
-          "
+      - uses: actions/checkout@v4
+      - name: Vote
+        run: python vote_cffi.py
+        env:
+          PG_VOTES: "30"
