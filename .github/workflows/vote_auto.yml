@@ -1,0 +1,22 @@
+name: Vote Auto
+
+on:
+  workflow_dispatch:
+
+jobs:
+  vote:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1,2,3,4,5]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Playwright
+        run: |
+          pip install playwright -q
+          playwright install chromium --with-deps
+      - name: Vote
+        run: xvfb-run python vote_pw.py
+        env:
+          PG_VOTES: "30"
