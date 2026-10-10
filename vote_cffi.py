@@ -42,40 +42,52 @@ else:
 
 print(f"Voting {TOTAL} times via origin {ORIGIN}...")
 
-ok = 0
-for i in range(TOTAL):
-    c = cea()
+MAX_RETRIES = 3
+
+def submit_vote(c, nonce_val):
     data = urllib.parse.urlencode({
         "action": "pg_vote_submit",
         "mobile": c,
         "votes": json.dumps({POST_ID: VOTE_VAL}),
-        "nonce": nonce,
+        "nonce": nonce_val,
     }).encode()
-    req = urllib.request.Request(
-        f"{ORIGIN}/wp-admin/admin-ajax.php",
-        data=data,
-        headers={
-            "Host": HOST,
-            "User-Agent": f"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(130, 148)}.0.0.0 Safari/537.36",
-            "X-Requested-With": "XMLHttpRequest",
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Referer": f"https://{HOST}/agent-choice-awards/vote/",
-            "Origin": f"https://{HOST}",
-        },
-    )
-    try:
-        r = urllib.request.urlopen(req, timeout=45, context=ctx)
-        body = r.read().decode()
-        success = '"success":true' in body
-        if success:
-            ok += 1
-        if i < 3 or (i + 1) % 10 == 0:
-            print(f"  {i+1}/{TOTAL} cea={c} ok={success}")
-        if not success and i < 3:
-            print(f"    resp: {body[:200]}")
-    except Exception as e:
-        if i < 5 or (i + 1) % 10 == 0:
-            print(f"  {i+1}/{TOTAL} cea={c} err={str(e)[:80]}")
+    headers = {
+        "Host": HOST,
+        "User-Agent": f"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(130, 148)}.0.0.0 Safari/537.36",
+        "X-Requested-With": "XMLHttpRequest",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Referer": f"https://{HOST}/agent-choice-awards/vote/",
+        "Origin": f"https://{HOST}",
+    }
+    for attempt in range(MAX_RETRIES):
+        req = urllib.request.Request(
+            f"{ORIGIN}/wp-admin/admin-ajax.php", data=data, headers=headers,
+        )
+        try:
+            r = urllib.request.urlopen(req, timeout=45, context=ctx)
+            body = r.read().decode()
+            return '"success":true' in body, body
+        except Exception as e:
+            err = str(e)
+            if "504" in err and attempt < MAX_RETRIES - 1:
+                time.sleep(random.uniform(1, 3) * (attempt + 1))
+                continue
+            return None, err
+    return None, "max retries"
+
+ok = 0
+for i in range(TOTAL):
+    c = cea()
+    result, detail = submit_vote(c, nonce)
+    if result is True:
+        ok += 1
+    if i < 3 or (i + 1) % 10 == 0:
+        if result is True:
+            print(f"  {i+1}/{TOTAL} cea={c} ok=True")
+        elif result is False:
+            print(f"  {i+1}/{TOTAL} cea={c} ok=False resp={str(detail)[:120]}")
+        else:
+            print(f"  {i+1}/{TOTAL} cea={c} err={str(detail)[:80]}")
     time.sleep(random.uniform(0.2, 0.5))
 
 print(f"DONE {ok}/{TOTAL} = {ok * VOTE_VAL}v")
