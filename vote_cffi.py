@@ -1,125 +1,81 @@
-import json, random, time, sys, os, re
-from curl_cffi.requests import Session
+import json, random, time, sys, os, ssl, re
+import urllib.request, urllib.parse
 
-DOMAIN = "https://www.agentofferings.propertyguru.com.sg"
-VOTE_URL = f"{DOMAIN}/agent-choice-awards/vote/"
-AJAX_URL = f"{DOMAIN}/wp-admin/admin-ajax.php"
+ORIGIN = "https://34.87.175.229"
+HOST = "www.agentofferings.propertyguru.com.sg"
 POST_ID = "24454"
+NONCE = "560010eb80"
 VOTE_VAL = 10
 TOTAL = int(os.getenv("PG_VOTES", "30"))
 
-FPS = ["chrome110", "chrome116", "chrome120", "chrome123", "chrome124"]
-HEADERS = {
-    "Content-Type": "application/x-www-form-urlencoded",
-    "X-Requested-With": "XMLHttpRequest",
-    "Referer": VOTE_URL,
-    "Origin": DOMAIN,
-}
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
 
 def cea():
-    return f"R{random.randint(100000, 999999)}{chr(random.randint(65, 90))}"
+    return f"{random.choice('RP')}{random.randint(100000, 999999)}{chr(random.randint(65, 90))}"
 
-def extract_nonce(html):
-    for pat in [
-        r'"nonce"\s*:\s*"([a-f0-9]{8,12})"',
-        r"'nonce'\s*:\s*'([a-f0-9]{8,12})'",
-        r'nonce[=:]\s*["\']([a-f0-9]{8,12})["\']',
-    ]:
-        m = re.search(pat, html)
+def fetch_nonce():
+    req = urllib.request.Request(
+        f"{ORIGIN}/agent-choice-awards/",
+        headers={"Host": HOST, "User-Agent": "Mozilla/5.0"},
+    )
+    try:
+        r = urllib.request.urlopen(req, timeout=20, context=ctx)
+        html = r.read().decode(errors="replace")
+        m = re.search(r"const\s+nonce\s*=\s*'([a-f0-9]{10})'", html)
         if m:
             return m.group(1)
+        m = re.search(r"'nonce'\s*,\s*\n\s*'([a-f0-9]{10})'", html)
+        if m:
+            return m.group(1)
+    except Exception as e:
+        print(f"Nonce fetch failed: {e}")
     return None
 
-fp = random.choice(FPS)
-session = Session(impersonate=fp)
+nonce = fetch_nonce()
+if nonce and nonce != NONCE:
+    print(f"Live nonce: {nonce} (updated from {NONCE})")
+else:
+    nonce = NONCE
+    print(f"Using nonce: {nonce}")
 
-print(f"Fetching vote page for nonce (fingerprint={fp})...")
-try:
-    r = session.get(VOTE_URL, headers={
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Upgrade-Insecure-Requests": "1",
-    }, timeout=30)
-    print(f"Vote page: HTTP {r.status_code}, len={len(r.text)}")
-except Exception as e:
-    print(f"Failed to fetch vote page: {e}")
-    sys.exit(1)
-
-if r.status_code != 200 or len(r.text) < 5000:
-    print(f"Page not loaded properly. Status={r.status_code} Snippet: {r.text[:300]}")
-    # Try alternate fingerprints
-    for alt_fp in FPS:
-        if alt_fp == fp:
-            continue
-        print(f"Trying fingerprint {alt_fp}...")
-        session = Session(impersonate=alt_fp)
-        try:
-            r = session.get(VOTE_URL, headers={
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-            }, timeout=30)
-            if r.status_code == 200 and len(r.text) > 5000:
-                fp = alt_fp
-                print(f"Success with {alt_fp}: HTTP {r.status_code}, len={len(r.text)}")
-                break
-        except:
-            continue
-    else:
-        print("All fingerprints failed to get past CF")
-        sys.exit(1)
-
-nonce = extract_nonce(r.text)
-if not nonce:
-    all_nonces = re.findall(r'["\']([a-f0-9]{10})["\']', r.text)
-    if all_nonces:
-        nonce = all_nonces[0]
-        print(f"Fallback nonce: {nonce} (from {len(all_nonces)} candidates)")
-
-if not nonce:
-    print("ERROR: No nonce found")
-    print(f"Page snippet: {r.text[:500]}")
-    sys.exit(1)
-
-print(f"Nonce: {nonce}")
-print(f"Voting {TOTAL} times...")
+print(f"Voting {TOTAL} times via origin {ORIGIN}...")
 
 ok = 0
 for i in range(TOTAL):
     c = cea()
+    data = urllib.parse.urlencode({
+        "action": "pg_vote_submit",
+        "mobile": c,
+        "votes": json.dumps({POST_ID: VOTE_VAL}),
+        "nonce": nonce,
+    }).encode()
+    req = urllib.request.Request(
+        f"{ORIGIN}/wp-admin/admin-ajax.php",
+        data=data,
+        headers={
+            "Host": HOST,
+            "User-Agent": f"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{random.randint(130, 148)}.0.0.0 Safari/537.36",
+            "X-Requested-With": "XMLHttpRequest",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": f"https://{HOST}/agent-choice-awards/vote/",
+            "Origin": f"https://{HOST}",
+        },
+    )
     try:
-        resp = session.post(AJAX_URL, data={
-            "action": "pg_vote_submit",
-            "mobile": c,
-            "votes": json.dumps({POST_ID: VOTE_VAL}),
-            "nonce": nonce,
-        }, headers=HEADERS, timeout=30)
-
-        success = False
-        if resp.status_code == 200:
-            try:
-                body = resp.json()
-                success = body.get("success", False)
-            except:
-                success = "success" in resp.text
-
+        r = urllib.request.urlopen(req, timeout=45, context=ctx)
+        body = r.read().decode()
+        success = '"success":true' in body
         if success:
             ok += 1
-
         if i < 3 or (i + 1) % 10 == 0:
-            print(f"  {i+1}/{TOTAL} cea={c} status={resp.status_code} ok={success}")
+            print(f"  {i+1}/{TOTAL} cea={c} ok={success}")
         if not success and i < 3:
-            print(f"    resp: {resp.text[:200]}")
-
-        if resp.status_code == 403 and i < 3:
-            print("CF block detected, rotating session...")
-            fp = random.choice(FPS)
-            session = Session(impersonate=fp)
-            session.get(VOTE_URL, timeout=30)
-
+            print(f"    resp: {body[:200]}")
     except Exception as e:
-        print(f"  {i+1}/{TOTAL} cea={c} error={str(e)[:100]}")
-        session = Session(impersonate=random.choice(FPS))
-
-    time.sleep(random.uniform(0.3, 1.0))
+        if i < 5 or (i + 1) % 10 == 0:
+            print(f"  {i+1}/{TOTAL} cea={c} err={str(e)[:80]}")
+    time.sleep(random.uniform(0.2, 0.5))
 
 print(f"DONE {ok}/{TOTAL} = {ok * VOTE_VAL}v")

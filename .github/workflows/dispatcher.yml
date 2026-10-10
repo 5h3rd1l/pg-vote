@@ -2,28 +2,25 @@ name: Dispatcher
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 jobs:
   dispatch:
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger vote workflows
+      - name: Trigger all vote workflows
         env:
           GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
         run: |
+          REPO="${{ github.repository }}"
           for w in vote_auto.yml vote_auto2.yml vote_auto3.yml; do
-            gh workflow run "$w" --repo ${{ github.repository }} &
+            gh workflow run "$w" --repo "$REPO" &
+          done
+          for i in $(seq 1 10); do
+            wf="vote.yml"
+            [ "$i" -gt 1 ] && wf="vote${i}.yml"
+            gh workflow run "$wf" --repo "$REPO" &
           done
           wait
-          echo "Dispatched at $(date -u)"
-
-      - name: Wait then re-dispatch
-        env:
-          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
-        run: |
-          echo "Sleeping 600s before next cycle..."
-          sleep 600
-          gh workflow run dispatcher.yml --repo ${{ github.repository }}
-          echo "Next dispatcher triggered at $(date -u)"
+          echo "Dispatched all at $(date -u)"
